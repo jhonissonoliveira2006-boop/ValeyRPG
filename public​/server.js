@@ -1,15 +1,22 @@
 'use strict';
-// Valley RPG - servidor. Uso: npm install && npm start  (index.html fica na mesma pasta)
-// Env: PORT, DATA_FILE, MAX_HISTORY (mensagens por mesa), VALLEY_ADMINS (usuarios separados por virgula)
+// Valley RPG - servidor. Uso: npm install && npm start  (index.html em public/index.html)
+// Env: PORT, DATA_FILE, MAX_HISTORY (mensagens por mesa), VALLEY_ADMINS (usuarios separados por virgula),
+//      MAX_ROOMS (total de salas publicas), ROOMS_PER_USER (salas por jogador)
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const PORT = +process.env.PORT || 3000;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data', 'db.json');
 const MAXH = +process.env.MAX_HISTORY || 5000;
 const ADMINS = (process.env.VALLEY_ADMINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const MAXR = +process.env.MAX_ROOMS || 60, PERU = +process.env.ROOMS_PER_USER || 3;
 
-let db = { users: {}, pass: {}, tokens: {}, chats: {}, inv: [] };
+let db = { users: {}, pass: {}, tokens: {}, chats: {}, inv: [], rooms: {} };
 try { db = Object.assign(db, JSON.parse(fs.readFileSync(DATA, 'utf8'))); } catch (e) {}
+if (!db.rooms || typeof db.rooms !== 'object') db.rooms = {};
+if (!Object.keys(db.rooms).length) { // salas iniciais (qualquer jogador pode entrar; so admin apaga)
+  db.rooms['#taverna'] = { id: '#taverna', n: 'Taverna', e: '🍺', by: 'sys', at: Date.now() };
+  db.rooms['#praca'] = { id: '#praca', n: 'Praça', e: '⛲', by: 'sys', at: Date.now() };
+}
 let wt;
 const flush = () => { clearTimeout(wt); fs.mkdirSync(path.dirname(DATA), { recursive: true }); fs.writeFileSync(DATA + '.tmp', JSON.stringify(db)); fs.renameSync(DATA + '.tmp', DATA); };
 const persist = () => { clearTimeout(wt); wt = setTimeout(flush, 500); };
@@ -46,7 +53,9 @@ function clean(u, d, old = {}) {
 const send = (res, code, o) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(o)); };
 const body = req => new Promise((ok, no) => { let n = 0; const c = []; req.on('data', d => { n += d.length; if (n > 8e6) { no(new Error('big')); req.destroy(); } else c.push(d); }); req.on('end', () => { try { ok(JSON.parse(Buffer.concat(c).toString() || '{}')); } catch (e) { no(e); } }); });
 const bearer = req => (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-const okEsp = e => e === '' || !!db.users[e];
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const isRoom = e => typeof e === 'string' && has(db.rooms, e);
+const okEsp = e => e === '' || (typeof e === 'string' && (has(db.users, e) || isRoom(e)));
 const hist = esp => (db.chats[esp] || []).slice(-60);
 const idKey = m => parseFloat(String(m.i || '').replace(/^\D+/, '')) || 0;
 
@@ -54,7 +63,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x'), ip = req.socket.remoteAddress;
   try {
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return fs.createReadStream(path.join(__dirname, 'index.html')).on('error', () => res.end('index.html nao encontrado')).pipe(res);
+      const f = [path.join(__dirname, 'public', 'index.html'), path.join(__dirname, 'index.html')].find(p => fs.existsSync(p));
+      if (!f) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('index.html nao encontrado (coloque em public/index.html)'); }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return fs.createReadStream(f).pipe(res);
     }
     if (req.method === 'POST' && (url.pathname === '/api/register' || url.pathname === '/api/login')) {
       if (blocked(ip)) return send(res, 429, { err: 'Muitas tentativas. Aguarde alguns minutos.' });
@@ -102,6 +113,8 @@ const conns = new Map(); // ctx -> true
 const wsSend = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
 const online = () => [...new Set([...conns.keys()].map(c => c.u))];
 const cast = (o, f) => { for (const c of conns.keys()) if (!f || f(c)) wsSend(c.ws, o); };
+const roomList = () => Object.values(db.rooms).map(r => ({ id: r.id, n: r.n, e: r.e, by: r.by, c: new Set([...conns.keys()].filter(c => c.esp === r.id).map(c => c.u)).size }));
+let rt; const castRooms = () => { clearTimeout(rt); rt = setTimeout(() => cast({ t: 'rooms', l: roomList() }), 150); };
 
 server.on('upgrade', (req, sock, head) => {
   const url = new URL(req.url, 'http://x');
@@ -118,7 +131,27 @@ server.on('upgrade', (req, sock, head) => {
         c.esp = okEsp(m.esp || '') ? (m.esp || '') : '';
         wsSend(ws, { t: 'hist', esp: c.esp, msgs: hist(c.esp) });
         const d = {}; for (const o of conns.keys()) if (o !== c && o.pos) d[o.u] = o.pos;
-        wsSend(ws, { t: 'peers', inv: db.inv, l: online(), d });
+        wsSend(ws, { t: 'peers', inv: db.inv, l: online(), d, adm: ADMINS.includes(c.u) });
+        wsSend(ws, { t: 'rooms', l: roomList() }); castRooms();
+      } else if (m.t === 'room') {
+        if (m.op === 'new') {
+          const n = String(m.n || '').replace(/[<>&"'`]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
+          const e = [...String(m.e || '').replace(/[<>&"'`\s]/g, '')].slice(0, 2).join('') || '💬';
+          const mine = Object.values(db.rooms).filter(r => r.by === c.u).length;
+          if (n.length < 3) return wsSend(ws, { t: 'roomerr', err: 'Nome da sala com pelo menos 3 letras.' });
+          if (Object.keys(db.rooms).length >= MAXR) return wsSend(ws, { t: 'roomerr', err: 'Limite de salas do servidor atingido.' });
+          if (!ADMINS.includes(c.u) && mine >= PERU) return wsSend(ws, { t: 'roomerr', err: 'Você já criou ' + PERU + ' salas. Apague uma para criar outra.' });
+          if (Object.values(db.rooms).some(r => r.n.toLowerCase() === n.toLowerCase())) return wsSend(ws, { t: 'roomerr', err: 'Já existe uma sala com esse nome.' });
+          const id = '#' + crypto.randomBytes(3).toString('hex');
+          db.rooms[id] = { id, n, e, by: c.u, at: Date.now() }; persist();
+          cast({ t: 'rooms', l: roomList() }); wsSend(ws, { t: 'roomnew', id });
+        } else if (m.op === 'del') {
+          const r = isRoom(m.id) && db.rooms[m.id];
+          if (!r || (r.by !== c.u && !ADMINS.includes(c.u))) return wsSend(ws, { t: 'roomerr', err: 'Só quem criou a sala pode apagá-la.' });
+          delete db.rooms[r.id]; delete db.chats[r.id]; persist();
+          for (const o of conns.keys()) if (o.esp === r.id) { o.esp = ''; wsSend(o.ws, { t: 'kick', esp: r.id }); }
+          cast({ t: 'rooms', l: roomList() });
+        }
       } else if (m.t === 'prof') {
         const p = clean(c.u, m.d, db.users[c.u]); if (!p) return;
         db.users[c.u] = p; persist(); cast({ t: 'prof', u: c.u, d: p }, o => o !== c);
@@ -140,7 +173,7 @@ server.on('upgrade', (req, sock, head) => {
         cast({ t: 'inv', d: db.inv });
       }
     });
-    ws.on('close', () => { conns.delete(c); cast({ t: 'online', l: online() }); });
+    ws.on('close', () => { conns.delete(c); cast({ t: 'online', l: online() }); castRooms(); });
     ws.on('error', () => {});
   });
 });
