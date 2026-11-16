@@ -221,7 +221,7 @@ html.bit *{border-color:#d2332a!important}
 </div></div>
 
 <div class="view" id="v-app">
-<div class="top"><div><b id="rn">Vale</b><br><span id="pres"></span></div><div style="display:flex;gap:6px"><button class="ib" id="mapbt" onclick="openMap()">🗺️ Mapa</button><button class="ib" id="cfgbt" onclick="cfgOpen()" aria-label="Configurações" title="Configurações">⚙️</button></div></div>
+<div class="top"><div><b id="rn">Vale</b><br><span id="pres"></span></div><div style="display:flex;gap:6px"><button class="ib" id="rmbt" onclick="roomsOpen()">🚪 Salas</button><button class="ib" id="mapbt" onclick="openMap()">🗺️ Mapa</button><button class="ib" id="cfgbt" onclick="cfgOpen()" aria-label="Configurações" title="Configurações">⚙️</button></div></div>
 
 <div class="tab on" id="t-vale">
 <div id="stw"><canvas id="stc" width="600" height="600"></canvas><svg id="st" viewBox="0 0 300 300"></svg></div>
@@ -474,7 +474,12 @@ $("manl").innerHTML=MAN.map(a=>`<div class="mi"><b>[${a[0]}]</b> ${a[1]}<div cla
 function msgHTML(m){const mine=m.u==me.u;let h=m.x?fmt(m.x):"";if(m.k=="acao"){const a=m.at&&atT(m.at).length?m.at:null;h=fmt(m.x||"",(a?atI(a):"✦")+" "+esc(m.w)+(a?" ("+atN(a)+") ":" "))}else if((m.k=="fala"||m.k=="ooc")&&!mine)h=`<b>${esc(m.w)}${m.k=="ooc"?" · fora":""}</b>`+h;const uu=mine?me:DB[m.u],bs=m.k=="fala"||m.k=="ooc"?bbStyle(uu,mine):"",bx=`<div class="m ${m.k}${mine&&m.k!="acao"&&m.k!="narr"?" me":""}"${bs?` style="${bs}"`:""}>${h}</div>`;if(m.k!="fala"&&m.k!="ooc")return bx;const av=avatar(m);return `<div class="mr ${m.k}${mine?" me":""}">${mine?bx+av:av+bx}</div>`}
 function renderMsgs(){$("msgs").innerHTML=C.map(msgHTML).join("");scrollM()}
 function scrollM(){const e=$("msgs");e.scrollTop=e.scrollHeight;$("npill").style.display="none"}
-let ESP="",AUP=0;const ck=()=>ESP?"valley_chat:"+ESP:"valley_chat";
+let ESP="",AUP=0,ROOMS=[],ADM=false;
+const isRm=e=>!!e&&e[0]=="#";
+function espTxt(e){if(!e)return"";if(isRm(e)){const r=ROOMS.find(x=>x.id==e);return"Sala "+(r?r.e+" "+r.n+" · "+r.c+" online":"")}return"Espaço de "+(DB[e]?DB[e].cn:e)}
+function roomsOpen(){show("perfil");setTimeout(()=>{const e=$("rmsec");if(e)e.scrollIntoView({behavior:"smooth",block:"start"})},60)}
+function roomsR(){const el=$("rmchips");if(!el)return;el.innerHTML=ROOMS.length?ROOMS.map(r=>`<button class="chip${ESP==r.id?" s":""}" data-ep="${esc(r.id)}">${esc(r.e)} ${esc(r.n)}${r.c?" · "+r.c:""}</button>`+(me&&(r.by==me.u||ADM)?`<button class="chip" data-rd="${esc(r.id)}" title="Apagar sala">🗑️</button>`:"")).join(""):'<div class="cuth">Nenhuma sala ainda. Crie a primeira!</div>'}
+const ck=()=>ESP?"valley_chat:"+ESP:"valley_chat";
 function ambUp(){const a=$("amb");a.classList.add("up");clearTimeout(AUP);AUP=setTimeout(()=>a.classList.remove("up"),3500)}
 function push(m){m.i=m.i||Date.now()+"."+(Math.random()*1e4|0);C.push(m);C=C.slice(-60);if(!m.rm)netSend({t:"chat",m});if(me){const e=$("msgs"),nb=e.scrollHeight-e.scrollTop-e.clientHeight<80||m.u==me.u;e.insertAdjacentHTML("beforeend",msgHTML(m));if(nb)scrollM();else $("npill").style.display=""}}
 $("npill").onclick=scrollM;$("msgs").onscroll=e=>{const g=e.target;if(g.scrollHeight-g.scrollTop-g.clientHeight<40)$("npill").style.display="none"};
@@ -1110,18 +1115,21 @@ let INVC=[];const INV=()=>INVC,invSet=L=>{INVC=L;netSend({t:"inv",d:L})};
 $("t-perfil").insertAdjacentHTML("beforeend",'<div id="mst" style="margin:14px 0"></div>');
 function setEsp(id){ESP=id;me.esp=id;save();C=[];ambStop(Object.keys(AMB),1);renderMsgs();netJoin();mstR()}
 function mstR(){if(!me)return;const on=!!me.m,chip=(id,l)=>`<button class="chip${ESP==id?" s":""}" data-ep="${esc(id)}">${l}</button>`;
-$("pn").textContent=me.cn+" · @"+me.u+(on?" · 🎭 Mestre":"");$("pres").textContent=ESP?"Espaço de "+(DB[ESP]?DB[ESP].cn:ESP):presN();
+$("pn").textContent=me.cn+" · @"+me.u+(on?" · 🎭 Mestre":"");$("pres").textContent=ESP?espTxt(ESP):presN();
 document.querySelectorAll('#t-mesa .chip[data-k="cena"],#fxem .chips .chip:nth-child(2),#mcn1,#mcn2').forEach(e=>e.style.display=on?"":"none");if(!on&&mode=="cena")document.querySelector('#t-mesa .chip[data-k="fala"]').click();
 let h=`<label>${on?"🎭 Você é mestre":"🧍 Você é jogador"}</label>`;
 if(!on)h+='<button class="btn" data-mv="1">🎭 Virar mestre</button><div class="cuth">Mestres têm o próprio espaço (chat separado) e são os únicos que usam efeitos de cenário.</div>';
+h+='<div id="rmsec" style="margin-top:10px"><div class="cuth">🚪 Salas públicas · qualquer jogador pode entrar e conversar</div><div class="chips" id="rmchips"></div><div class="cutr" style="margin-top:6px"><input id="rme" value="💬" maxlength="2" style="width:48px;text-align:center"><input id="rmn" placeholder="Nome da nova sala" maxlength="24" style="flex:1"><button class="chip" data-rn="1">Criar</button></div></div>';
 h+='<div class="cuth" style="margin-top:8px">Espaço atual</div><div class="chips">'+chip("","🌍 Vale público")+(on?chip(me.u,"🎭 Meu espaço"):"")+(me.jn||[]).filter(x=>x!=me.u).map(x=>chip(x,"🎭 @"+esc(x))).join("")+"</div>";
 h+='<div class="cutr" style="margin-top:6px"><input id="mjoin" placeholder="Entrar no espaço de @mestre" style="flex:1"><button class="chip" data-mj="1">Entrar</button></div>';
 if(on)h+='<div class="cutr" style="margin-top:6px"><input id="minv" placeholder="Convidar @jogador para ser mestre" style="flex:1"><button class="chip" data-mi="1">Convidar</button></div>';
 if(on){const L=me.lim||{on:0,n:5,r:0};h+=`<div class="cuth" style="margin-top:10px">🏃 Movimento por rodadas</div><div class="chips"><button class="chip${L.on?" s":""}" data-lm="t">${L.on?"Limite ligado":"Limite desligado"}</button><button class="chip" data-lm="r">🔄 Nova rodada</button></div><div class="cutr" style="margin-top:6px"><span>Blocos por rodada</span><button class="chip" data-lm="-1">−</button><b>${L.n}</b><button class="chip" data-lm="1">+</button></div><div class="cuth">Ligado: jogadores do seu espaço gastam estamina ao andar (1 por bloco, degrau +1, água +1). Desligado: movimento livre.</div>`}
 h+=INV().filter(v=>v.t==me.u).map(v=>`<div class="cutr" style="margin-top:6px">📨 @${esc(v.f)} te convidou para ser mestre <button class="chip" data-ia="${esc(v.f)}">Aceitar</button><button class="chip" data-ir="${esc(v.f)}">Recusar</button></div>`).join("");
-$("mst").innerHTML=h+'<div class="err" id="merr"></div>';cfgApply()}
-$("mst").onclick=e=>{const b=e.target.closest("[data-ep],[data-mv],[data-mj],[data-mi],[data-ia],[data-ir],[data-lm]");if(!b)return;const er=t=>{$("merr").textContent=t},nm=id=>($(id).value||"").trim().replace(/^@/,"").toLowerCase();
+$("mst").innerHTML=h+'<div class="err" id="merr"></div>';roomsR();cfgApply()}
+$("mst").onclick=e=>{const b=e.target.closest("[data-ep],[data-mv],[data-mj],[data-mi],[data-ia],[data-ir],[data-lm],[data-rn],[data-rd]");if(!b)return;const er=t=>{$("merr").textContent=t},nm=id=>($(id).value||"").trim().replace(/^@/,"").toLowerCase();
 if(b.dataset.mv!=null){me.m=true;setEsp(me.u)}else if(b.dataset.ep!=null){if(b.dataset.ep!=ESP)setEsp(b.dataset.ep)}
+else if(b.dataset.rn!=null){const n=($("rmn").value||"").trim();if(n.length<3)return er("Nome da sala com pelo menos 3 letras.");er("");netSend({t:"room",op:"new",n,e:($("rme").value||"").trim()});$("rmn").value=""}
+else if(b.dataset.rd!=null){if(confirm("Apagar esta sala e todo o histórico dela?"))netSend({t:"room",op:"del",id:b.dataset.rd})}
 else if(b.dataset.lm!=null){const L=me.lim=me.lim||{on:0,n:5,r:0},v=b.dataset.lm;if(v=="t"){L.on=L.on?0:1;note("🏃 Limite de movimento "+(L.on?"ligado.":"desligado."))}else if(v=="r"){L.r++;note("🔄 Nova rodada! Cada jogador recupera "+L.n+" blocos de movimento.")}else L.n=cl(L.n+ +v,1,30);save();mstR()}
 else if(b.dataset.mj!=null){const n=nm("mjoin");if(!DB[n]||!DB[n].m)return er("Não achei um mestre com esse nome.");me.jn=Array.from(new Set((me.jn||[]).concat(n)));setEsp(n)}
 else if(b.dataset.mi!=null){const n=nm("minv");if(!DB[n])return er("Não achei @"+n+".");if(n==me.u||DB[n].m)return er("@"+n+" já é mestre.");invSet(INV().filter(v=>!(v.f==me.u&&v.t==n)).concat({f:me.u,t:n}));er("Convite enviado para @"+n+".")}
@@ -1190,12 +1198,16 @@ WS.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}netRecv(m)};
 WS.onclose=ev=>{if(!me)return;if(ev.code==4001){toast("Sessão expirada. Entre de novo.");return sair()}WR=setTimeout(netConnect,1500)}}
 function netRecv(m){
 if(!me)return;
-if(m.t=="hist"){if(m.esp!=ESP)return;C=m.msgs||[];if(!C.length)C=[{k:"narr",u:"sys",rm:1,i:"w"+Date.now(),x:ESP?"Espaço de "+(DB[ESP]?DB[ESP].cn:ESP)+" aberto.":R[me.reg].t}];renderMsgs()}
+if(m.t=="hist"){if(m.esp!=ESP)return;C=m.msgs||[];if(!C.length)C=[{k:"narr",u:"sys",rm:1,i:"w"+Date.now(),x:ESP?espTxt(ESP)+" aberto.":R[me.reg].t}];renderMsgs()}
 else if(m.t=="chat"){if(m.esp!=ESP||C.some(c=>c.i==m.m.i))return;const x=m.m;x.rm=1;push(x);fxIn(x);if(x.k=="fala")bub(x.w,x.x)}
 else if(m.t=="prof"){if(m.u==me.u)return;DB[m.u]=m.d;if(m.u==ESP){cfgApply();mstR()}}
 else if(m.t=="inv"){INVC=m.d||[];mstR()}
 else if(m.t=="online"){ONL=new Set(m.l);presUI()}
-else if(m.t=="peers"){INVC=m.inv||[];ONL=new Set(m.l);for(const u in m.d)netPos(m.d[u]);presUI()}
+else if(m.t=="rooms"){ROOMS=m.l||[];if(isRm(ESP)&&!ROOMS.some(r=>r.id==ESP)){toast("A sala foi encerrada. Voltando ao Vale público.");setEsp("")}else{presUI();roomsR()}}
+else if(m.t=="roomnew")setEsp(m.id)
+else if(m.t=="roomerr"){const e=$("merr");if(e)e.textContent=m.err;toast(m.err)}
+else if(m.t=="kick"){if(m.esp==ESP){toast("A sala foi encerrada. Voltando ao Vale público.");setEsp("")}}
+else if(m.t=="peers"){ADM=!!m.adm;INVC=m.inv||[];ONL=new Set(m.l);for(const u in m.d)netPos(m.d[u]);presUI()}
 else if(m.t=="pos")netPos(m.d)}
 function netPos(p){if(!p||p.u==(me&&me.u))return;const o=PEERS[p.u];
 if(!o||o.reg!=p.reg||o.scn!=p.scn||o.esp!=p.esp)PEERS[p.u]={u:p.u,x:p.x,y:p.y,tx:p.x,ty:p.y,reg:p.reg,scn:p.scn,esp:p.esp};
@@ -1208,7 +1220,7 @@ for(const u in PEERS){const p=PEERS[u];if(!ONL.has(u)||!DB[u]||(p.esp||"")!=(ESP
 const a=old.get(u)||{u,x:p.tx,y:p.ty,tx:p.tx,ty:p.ty};a.tx=p.tx;a.ty=p.ty;a.n=DB[u].cn;a.b=DB[u].b;L.push(a)}
 if(L.length!=NPC.length||L.some((a,i)=>a!==NPC[i])){NPC.length=0;L.forEach(a=>NPC.push(a))}}
 const presN=()=>ONL.size+(ONL.size==1?" viajante online":" viajantes online");
-function presUI(){if(me)$("pres").textContent=ESP?"Espaço de "+(DB[ESP]?DB[ESP].cn:ESP):presN()}
+function presUI(){if(me)$("pres").textContent=ESP?espTxt(ESP):presN()}
 async function authReq(url,body,el){el.textContent="";
 try{const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),d=await r.json();
 if(!r.ok)return el.textContent=d.err||"Erro.";TOK=d.token;st.set("valley_tok",TOK);DB=d.users;entrar(d.u)}
@@ -1222,7 +1234,7 @@ go("portal")})();
 const PK=["cn","bio","b","photo","shape","fr","fm","bb","bd","cs"],HX=/^#[0-9a-f]{3,8}$/i,IM=/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/,SID=/^[\w-]{1,8}$/;
 document.head.insertAdjacentHTML("beforeend","<style>#bk{position:fixed;inset:0;z-index:46;background:rgba(5,20,35,.6);display:none;align-items:flex-end;justify-content:center}#bk.on{display:flex;animation:in .25s}#bkc{width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-bottom:0;border-radius:22px 22px 0 0;padding:14px 18px calc(20px + env(safe-area-inset-bottom,0px))}</style>");
 document.body.insertAdjacentHTML("beforeend",'<div id="bk"><div id="bkc"></div></div><input type="file" id="bkf" accept=".json,application/json,text/plain" hidden>');
-const bk=$("bk"),bc=$("bkc"),stamp=()=>new Date().toISOString().slice(0,10),espN=()=>ESP?(DB[ESP]?DB[ESP].cn:ESP):"Mesa pública";
+const bk=$("bk"),bc=$("bkc"),stamp=()=>new Date().toISOString().slice(0,10),espN=()=>ESP?(isRm(ESP)?espTxt(ESP).replace(/ · \d+ online$/,""):(DB[ESP]?DB[ESP].cn:ESP)):"Mesa pública";
 function dl(n,t,m){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:m||"application/json"}));a.download=n;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1e3)}
 async function cp(t){try{await navigator.clipboard.writeText(t);return 1}catch(e){const x=document.createElement("textarea");x.value=t;x.style.cssText="position:fixed;opacity:0";document.body.appendChild(x);x.select();let k=0;try{k=document.execCommand("copy")}catch(e){}x.remove();return k}}
 const prof=()=>{const d={};PK.forEach(k=>{if(me[k]!==undefined)d[k]=JSON.parse(JSON.stringify(me[k]))});return JSON.stringify({valley:"perfil",v:1,u:me.u,at:new Date().toISOString(),d})};
