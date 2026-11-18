@@ -1,8 +1,8 @@
 {
-  "name": "valley-rpg",
+  "name": "valley",
   "version": "1.0.0",
-  "main": "server.js",
+  "private": true,
+  "description": "Valley RPG: index.html (jogo) + server.js (servidor)",
   "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" },
-  "dependencies": { "ws": "^8.18.0" }
+  "engines": { "node": ">=18" }
 }
