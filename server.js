@@ -8,7 +8,7 @@
    e MÚSICA DA SALA (toca-discos: quem põe um disco toca para todos da sala).
    O index.html é só o jogo; este arquivo é só o servidor. Ficam separados, na mesma pasta.
    ============================================================ */
-const http=require("http"),fs=require("fs"),path=require("path"),crypto=require("crypto");
+const http=require("http"),fs=require("fs"),path=require("path"),crypto=require("crypto"),zlib=require("zlib");
 const PORT=+process.env.PORT||3000,DIR=process.env.VALLEY_DATA||path.join(__dirname,"data"),MEDIA=path.join(DIR,"media"),DBF=path.join(DIR,"db.json");
 const MAXM=50*1024*1024,MAXA=150*1024*1024,MAXH=5000,MAXR=60,PERU=3,has=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
 fs.mkdirSync(MEDIA,{recursive:true});
@@ -121,7 +121,7 @@ if(m.t==="join"){
 if(c.live){c.live=false;liveCast(c.esp)}
 musDrop(c,c.esp);
 c.esp=okEsp(m.esp||"")?(m.esp||""):"";
-wsSend(c,{t:"hist",esp:c.esp,msgs:hist(c.esp,c.u)});wsSend(c,{t:"live",esp:c.esp,l:liveList(c.esp)});wsSend(c,{t:"ini",esp:c.esp,s:INI[c.esp]||null});wsSend(c,{t:"sum",esp:c.esp,s:(db.sum||{})[c.esp]||null});wsSend(c,{t:"bg",esp:c.esp,s:(db.bg||{})[c.esp]||null});wsSend(c,{t:"conds",esp:c.esp,m:(db.cd||{})[c.esp]||{}});{const q=musOut(c.esp);if(q)wsSend(c,q)}
+wsSend(c,{t:"hist",esp:c.esp,msgs:hist(c.esp,c.u)});wsSend(c,{t:"live",esp:c.esp,l:liveList(c.esp)});wsSend(c,{t:"ini",esp:c.esp,s:INI[c.esp]||null});wsSend(c,{t:"sum",esp:c.esp,s:(db.sum||{})[c.esp]||null});wsSend(c,{t:"bg",esp:c.esp,s:(db.bg||{})[c.esp]||null});wsSend(c,{t:"sit",esp:c.esp,all:(db.sit||{})[c.esp]||{}});wsSend(c,{t:"conds",esp:c.esp,m:(db.cd||{})[c.esp]||{}});{const q=musOut(c.esp);if(q)wsSend(c,q)}
 const d={};for(const o of conns)if(o!==c&&o.pos)d[o.u]=o.pos;
 wsSend(c,{t:"peers",inv:db.inv,l:online(),d,adm:true});
 wsSend(c,{t:"rooms",l:roomList()});castRooms()}
@@ -138,7 +138,7 @@ cast({t:"rooms",l:roomList()});wsSend(c,{t:"roomnew",id})}
 else if(m.op==="del"){
 const r=isRoom(m.id)&&db.rooms[m.id];
 if(!r)return wsSend(c,{t:"roomerr",err:"Sala não encontrada."});
-delete db.rooms[r.id];delete db.chats[r.id];delete MUS[r.id];if(db.sum)delete db.sum[r.id];if(db.cd)delete db.cd[r.id];if(db.bg)delete db.bg[r.id];persist();
+delete db.rooms[r.id];delete db.chats[r.id];delete MUS[r.id];if(db.sum)delete db.sum[r.id];if(db.cd)delete db.cd[r.id];if(db.bg)delete db.bg[r.id];if(db.sit)delete db.sit[r.id];persist();
 for(const o of conns)if(o.esp===r.id){o.esp="";wsSend(o,{t:"kick",esp:r.id})}
 cast({t:"rooms",l:roomList()})}}
 else if(m.t==="prof"){
@@ -187,6 +187,11 @@ else if(m.t==="mop"){const L=db.chats[c.esp]||[],g=L.find(o=>o.i===String(m.i||"
 if(m.op==="del"){if(!mine&&!gm)return;for(const k of["x","md","vr","q","dr","its","at","r","o"])delete g[k];g.dl=1;persist();cast({t:"mop",esp:c.esp,op:"del",i:g.i},ev)}
 else if(m.op==="edit"){const x=String(m.x||"").slice(0,4000);if(!mine||!x.trim()||typeof g.x!=="string"||!["fala","acao","ooc"].includes(g.k))return;g.o=g.x.slice(0,4000);g.x=x;g.ed=1;persist();cast({t:"mop",esp:c.esp,op:"edit",i:g.i,x,o:g.o},ev)}
 else if(m.op==="react"){const e=String(m.e||"");if(e.length>24||!/^(?:\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}])*|[\u{1F1E6}-\u{1F1FF}]{2})$/u.test(e))return;const r=g.r=g.r||{};if(!r[e]&&Object.keys(r).length>=12)return;const a=r[e]=r[e]||[],k=a.indexOf(c.u);if(k<0)a.push(c.u);else a.splice(k,1);if(!a.length)delete r[e];if(!Object.keys(r).length)delete g.r;persist();cast({t:"mop",esp:c.esp,op:"react",i:g.i,r:g.r||{}},ev)}}
+else if(m.t==="sit"){const e=c.esp,ro=db.rooms[e],gm=!!e&&(c.u===e||!!(ro&&ro.by===c.u)),k=String(m.k||"").slice(0,30);if(!e||!k)return;
+const R=(db.sit=db.sit||{})[e]||{},L=R[k]||[],out=()=>{if(L.length)R[k]=L;else delete R[k];if(Object.keys(R).length)db.sit[e]=R;else delete db.sit[e];persist();cast({t:"sit",esp:e,k,l:L},o=>o.esp===e)};
+if(m.op==="add"){if(!gm||L.length>=40)return;const x=+m.x,y=+m.y,it=cleanIt([m.it]);if(!isFinite(x)||!isFinite(y)||!it||!it.length)return;let id;do{id=Math.random().toString(36).slice(2,8)}while(id.length<4||L.some(v=>v.id===id));L.push({id,x:+x.toFixed(2),y:+y.toFixed(2),it:it[0]});out()}
+else if(m.op==="del"){if(!gm)return;const i=L.findIndex(v=>v.id===m.id);if(i<0)return;L.splice(i,1);out()}
+else if(m.op==="take"){const i=L.findIndex(v=>v.id===m.id);if(i<0)return wsSend(c,{t:"sitgone",esp:e});const v=L[i],q=c.pos,RS=(handle.rs=handle.rs||{}),rk=e+"|"+k+"|"+v.id,rs=RS[rk];if(q&&(q.scn||q.reg)===k&&Math.hypot(q.x-v.x,q.y-v.y)>3)return;if(rs&&Date.now()-rs.at<15000){if(rs.u!==c.u)wsSend(c,{t:"sitgone",esp:e});return}RS[rk]={u:c.u,at:Date.now()};wsSend(c,{t:"sitgot",esp:e,k,id:v.id,it:v.it})}else if(m.op==="ack"){const RS=(handle.rs=handle.rs||{}),id=String(m.id||""),rk=e+"|"+k+"|"+id,rs=RS[rk];if(!rs||rs.u!==c.u)return;delete RS[rk];const i=L.findIndex(v=>v.id===id);if(i>=0){L.splice(i,1);out()}}else if(m.op==="rel"){const RS=(handle.rs=handle.rs||{}),rk=e+"|"+k+"|"+String(m.id||"");if(RS[rk]&&RS[rk].u===c.u)delete RS[rk]}}
 else if(m.t==="typ"){
 cast({t:"typ",esp:c.esp,u:c.u,off:m.off?1:0},o=>o!==c&&o.esp===c.esp)}
 else if(m.t==="inv"){
@@ -253,10 +258,15 @@ if(p==="/api/chat/import"&&m==="POST"){if(!u)return J(res,{err:"Sessão inválid
 const have=new Set((db.chats[esp]||[]).map(x=>x.i)),add=[];for(const g of msgs.slice(0,MAXH)){if(!g||typeof g!=="object"||typeof g.k!=="string"||!g.i||have.has(g.i)||JSON.stringify(g).length>20000)continue;if(g.k==="moeda"){if(!/^[a-z0-9]{4,10}$/.test(String(g.cid)))continue;g.v=Math.min(1000000,Math.max(1,Math.floor(+g.v||0)));g.n=String(g.n||"Moedas").replace(/[<>&"'`]/g,"").slice(0,30)||"Moedas";g.w=String(g.w||"").replace(/[<>&"'`]/g,"").slice(0,20);g.to=(Array.isArray(g.to)?g.to:[]).filter(v=>typeof v==="string").slice(0,8).map(v=>v.slice(0,20));delete g.x;delete g.at}else if(g.k==="bau"){const it=cleanIt(g.its);if(!it||!it.length||!/^[a-z0-9]{4,10}$/.test(String(g.bid)))continue;g.its=it.slice(0,8);g.n=String(g.n||"Baú").replace(/[<>&"'`]/g,"").slice(0,20)||"Baú";g.w=String(g.w||"").replace(/[<>&"'`]/g,"").slice(0,20);g.max=Math.min(g.its.length,Math.max(1,g.max|0));g.to=(Array.isArray(g.to)?g.to:[]).filter(v=>typeof v==="string").slice(0,8).map(v=>v.slice(0,20));delete g.x;delete g.at}have.add(g.i);add.push(g)}
 db.chats[esp]=[...(db.chats[esp]||[]),...add].sort((a,c)=>idKey(a)-idKey(c)).slice(-MAXH);persist();for(const c of conns)if(c.esp===esp)wsSend(c,{t:"hist",esp,msgs:hist(esp,c.u)});return J(res,{ok:true,added:add.length,skipped:msgs.length-add.length})}
 return J(res,{err:"Não encontrado."},404)}
+let PAGE=null;
 const server=http.createServer(async(req,res)=>{
 try{const url=new URL(req.url,"http://x");
 if(url.pathname.startsWith("/api/"))return await api(req,res,url);
-if((url.pathname==="/"||url.pathname==="/index.html")&&(req.method==="GET"||req.method==="HEAD")){const h=fs.readFileSync(path.join(__dirname,"index.html"));res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache"});return res.end(req.method==="HEAD"?undefined:h)}
+if((url.pathname==="/"||url.pathname==="/index.html")&&(req.method==="GET"||req.method==="HEAD")){const hf=path.join(__dirname,"index.html"),mt=fs.statSync(hf).mtimeMs;
+/* a página é comprimida uma vez (gzip e brotli) e guardada em memória: o navegador baixa ~1/4 do tamanho, sem mudar nada no jogo */
+if(!PAGE||PAGE.m!==mt){const raw=fs.readFileSync(hf);PAGE={m:mt,raw,gz:zlib.gzipSync(raw,{level:9}),br:zlib.brotliCompressSync(raw)}}
+const ae=String(req.headers["accept-encoding"]||""),br=/\bbr\b/.test(ae),gz=/\bgzip\b/.test(ae),h=br?PAGE.br:gz?PAGE.gz:PAGE.raw,hd={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache","Vary":"Accept-Encoding","Content-Length":h.length};if(br)hd["Content-Encoding"]="br";else if(gz)hd["Content-Encoding"]="gzip";
+res.writeHead(200,hd);return res.end(req.method==="HEAD"?undefined:h)}
 res.writeHead(404,{"Content-Type":"text/plain; charset=utf-8"});res.end("Não encontrado.")}
 catch(e){console.error(e);if(!res.headersSent)J(res,{err:"Erro no servidor."},500);else res.end()}});
 server.on("upgrade",upgrade);
